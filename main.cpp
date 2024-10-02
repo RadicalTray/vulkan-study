@@ -1,10 +1,12 @@
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <optional>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -13,14 +15,62 @@
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
-const std::vector<const char *> validationLayers = {
-    "VK_LAYER_KHRONOS_validation"};
+const std::vector<const char *> validationLayers = { "VK_LAYER_KHRONOS_validation" };
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif
+
+bool checkValidationLayerSupport() {
+  uint32_t layerCount;
+  vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+  std::vector<VkLayerProperties> availableLayers(layerCount);
+  vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+  for (const auto &requestedLayerName : validationLayers) {
+    bool found = false;
+    for (const auto &layerProperties : availableLayers) {
+      if (std::strcmp(requestedLayerName, layerProperties.layerName) == 0) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+  }
+
+  std::cout << "Validation layers support checked!" << std::endl;
+  return true;
+}
+
+struct QueueFamilyIndices {
+  std::optional<uint32_t> graphicsFamily;
+
+  bool isComplete() {
+    return graphicsFamily.has_value();
+  }
+};
+
+QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
+  uint32_t queueFamilyCount = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+  std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+  QueueFamilyIndices indices;
+  for (int i = 0; i < queueFamilyCount; i++) {
+    if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+      indices.graphicsFamily = i;
+    }
+    if (indices.isComplete()) {
+      break;
+    }
+  }
+  return indices;
+}
 
 VkResult CreateDebugUtilsMessengerEXT(
     VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
@@ -58,6 +108,9 @@ private:
   GLFWwindow *window;
   VkInstance instance;
   VkDebugUtilsMessengerEXT debugMessenger;
+  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+  VkDevice device;
+  VkQueue graphicsQueue;
 
   void initWindow() {
     glfwInit();
@@ -66,7 +119,12 @@ private:
     window = glfwCreateWindow(WIDTH, HEIGHT, "VULKAN", nullptr, nullptr);
   }
 
-  void initVulkan() { createInstance(); }
+  void initVulkan() {
+    createInstance();
+    setupDebugMessenger();
+    pickPhysicalDevice();
+    createLogicalDevice();
+  }
 
   void createInstance() {
     if (enableValidationLayers && !checkValidationLayerSupport()) {
@@ -92,7 +150,7 @@ private:
     vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount,
                                            availableExtensions.data());
 
-    std::cout << "available extensions:\n";
+    std::cout << "Available extensions:\n";
     for (const auto &extension : availableExtensions) {
       std::cout << '\t' << extension.extensionName << '\n';
     }
@@ -121,6 +179,35 @@ private:
     if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
       throw std::runtime_error("Failed to create vulkan instance!");
     }
+  }
+
+  std::vector<const char *> getRequiredExtensions(const std::vector<VkExtensionProperties> &availableExtensions) {
+    uint32_t glfwExtensionCount = 0;
+    const char **glfwExtensions;
+    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+    std::vector<const char *> requiredExtensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+    if (enableValidationLayers) {
+      requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+
+    for (const auto &requiredExtensionName : requiredExtensions) {
+      bool found = false;
+      for (const auto &extensionProperties : availableExtensions) {
+        if (std::strcmp(requiredExtensionName,
+                        extensionProperties.extensionName) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        std::cout << "[ERROR]: extension: " << requiredExtensionName
+                  << " not supported by Vulkan." << std::endl;
+      }
+    }
+
+    return requiredExtensions;
   }
 
   void setupDebugMessenger() {
@@ -156,62 +243,92 @@ private:
                 VkDebugUtilsMessageTypeFlagsEXT messageType,
                 const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                 void *pUserData) {
-    std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+    std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
     return VK_FALSE;
   }
 
-  std::vector<const char *> getRequiredExtensions(
-      const std::vector<VkExtensionProperties> &availableExtensions) {
-    uint32_t glfwExtensionCount = 0;
-    const char **glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+  void pickPhysicalDevice() {
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+    if (!deviceCount) {
+      throw std::runtime_error("Failed to find GPUs with vulkan support!");
+    }
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-    std::vector<const char *> requiredExtensions(
-        glfwExtensions, glfwExtensions + glfwExtensionCount);
+    std::multimap<int, VkPhysicalDevice> candidates;
 
-    if (enableValidationLayers) {
-      requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    std::cout << "Rating devices..." << std::endl;
+    for (const auto &device : devices) {
+      int score = rateDevice(device);
+      candidates.insert({ score, device });
     }
 
-    for (const auto &requiredExtensionName : requiredExtensions) {
-      bool found = false;
-      for (const auto &extensionProperties : availableExtensions) {
-        if (std::strcmp(requiredExtensionName,
-                        extensionProperties.extensionName) == 0) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        std::cout << "[ERROR]: extension: " << requiredExtensionName
-                  << " not supported by Vulkan." << std::endl;
-      }
+    if (candidates.rbegin()->first > 0) {
+      physicalDevice = candidates.rbegin()->second;
+      return;
     }
 
-    return requiredExtensions;
+    throw std::runtime_error("Failed to find a suitable GPU!");
   }
 
-  bool checkValidationLayerSupport() {
-    uint32_t layerCount;
-    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-    std::vector<VkLayerProperties> availableLayers(layerCount);
-    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+  int rateDevice(VkPhysicalDevice device) {
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+    VkPhysicalDeviceFeatures deviceFeatures;
+    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
-    for (const auto &requestedLayerName : validationLayers) {
-      bool found = false;
-      for (const auto &layerProperties : availableLayers) {
-        if (std::strcmp(requestedLayerName, layerProperties.layerName) == 0) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        return false;
-      }
+    QueueFamilyIndices indices = findQueueFamilies(device);
+
+    std::cout << "Device : " << deviceProperties.deviceName << std::endl;
+
+    if (!deviceFeatures.geometryShader || !indices.isComplete()) {
+      std::cout << "Not suitable!" << std::endl;
+      return 0;
     }
 
-    std::cout << "Validation layers support checked!" << std::endl;
-    return true;
+    int score = 0;
+
+    if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+      score += 69;
+    }
+
+    score += deviceProperties.limits.maxImageDimension2D;
+
+    std::cout << "Score  : " << score << std::endl;
+    return score;
+  }
+
+  void createLogicalDevice() {
+    QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+    VkDeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+    queueCreateInfo.queueCount = 1;
+    float queuePriority = 1.0f;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+
+    VkPhysicalDeviceFeatures deviceFeatures{};
+    createInfo.pEnabledFeatures = &deviceFeatures;
+
+    createInfo.enabledExtensionCount = 0;
+    if (enableValidationLayers) {
+      createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+      createInfo.ppEnabledLayerNames = validationLayers.data();
+    } else {
+      createInfo.enabledLayerCount = 0;
+    }
+
+    if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create logical device!");
+    }
+    vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
   }
 
   void mainLoop() {
@@ -222,8 +339,10 @@ private:
 
   void cleanup() {
     if (enableValidationLayers) {
+      // TODO: check the validation layers after successfully making a wayland window
       // DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
+    vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
     glfwDestroyWindow(window);
     glfwTerminate();
