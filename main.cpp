@@ -38,29 +38,6 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif
 
-bool checkValidationLayerSupport() {
-  uint32_t layerCount;
-  vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-  std::vector<VkLayerProperties> availableLayers(layerCount);
-  vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
-
-  for (const auto &requestedLayerName : validationLayers) {
-    bool found = false;
-    for (const auto &layerProperties : availableLayers) {
-      if (std::strcmp(requestedLayerName, layerProperties.layerName) == 0) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      return false;
-    }
-  }
-
-  std::cout << "Validation layers support checked!" << std::endl;
-  return true;
-}
-
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;
@@ -69,29 +46,6 @@ struct QueueFamilyIndices {
     return graphicsFamily.has_value() && presentFamily.has_value();
   }
 };
-
-VkResult CreateDebugUtilsMessengerEXT(
-    VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
-    const VkAllocationCallbacks *pAllocator,
-    VkDebugUtilsMessengerEXT *pDebugMessenger) {
-  auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-      instance, "vkCreateDebugUtilsMessengerEXT");
-  if (func == nullptr) {
-    return VK_ERROR_EXTENSION_NOT_PRESENT;
-  }
-
-  return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
-}
-
-void DestroyDebugUtilsMessengerEXT(VkInstance instance,
-                                   VkDebugUtilsMessengerEXT debugMessenger,
-                                   const VkAllocationCallbacks *pAllocator) {
-  auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-      instance, "vkDestroyDebugUtilsMessengerEXT");
-  if (func != nullptr) {
-    func(instance, debugMessenger, pAllocator);
-  }
-}
 
 class HelloTriangleApplication {
 public:
@@ -142,6 +96,7 @@ private:
     createLogicalDevice();
     createSwapchain();
     createImageViews();
+    createGraphicsPipeline();
   }
 
   void createInstance() {
@@ -199,6 +154,29 @@ private:
     }
   }
 
+  bool checkValidationLayerSupport() {
+    uint32_t layerCount;
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    std::vector<VkLayerProperties> availableLayers(layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+    for (const auto &requestedLayerName : validationLayers) {
+      bool found = false;
+      for (const auto &layerProperties : availableLayers) {
+        if (std::strcmp(requestedLayerName, layerProperties.layerName) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return false;
+      }
+    }
+
+    std::cout << "Validation layers support checked!" << std::endl;
+    return true;
+  }
+
   std::vector<const char *> getRequiredExtensions(const std::vector<VkExtensionProperties> &availableExtensions) {
     uint32_t glfwExtensionCount = 0;
     const char **glfwExtensions;
@@ -253,6 +231,19 @@ private:
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = debugCallback;
     createInfo.pUserData = nullptr;
+  }
+
+  VkResult CreateDebugUtilsMessengerEXT(
+      VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+      const VkAllocationCallbacks *pAllocator,
+      VkDebugUtilsMessengerEXT *pDebugMessenger) {
+    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+        instance, "vkCreateDebugUtilsMessengerEXT");
+    if (func == nullptr) {
+      return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+
+    return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
   }
 
   void createSurface() {
@@ -559,6 +550,9 @@ private:
     }
   }
 
+  void createGraphicsPipeline() {
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
@@ -579,6 +573,17 @@ private:
     glfwDestroyWindow(window);
     glfwTerminate();
   }
+
+  void DestroyDebugUtilsMessengerEXT(VkInstance instance,
+                                     VkDebugUtilsMessengerEXT debugMessenger,
+                                     const VkAllocationCallbacks *pAllocator) {
+    auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+        instance, "vkDestroyDebugUtilsMessengerEXT");
+    if (func != nullptr) {
+      func(instance, debugMessenger, pAllocator);
+    }
+  }
+
 };
 
 int main() {
