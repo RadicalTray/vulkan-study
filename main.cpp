@@ -1,17 +1,19 @@
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <algorithm>
 #include <map>
 #include <set>
-#include <vulkan/vk_platform.h>
-#include <vulkan/vulkan_core.h>
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #include <optional>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+
+#include <vulkan/vk_platform.h>
+#include <vulkan/vulkan_core.h>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -20,7 +22,7 @@ const std::vector<const char*> requiredDeviceExtensions = {
   VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-struct SwapChainSupportDetails {
+struct SwapchainSupportDetails {
   VkSurfaceCapabilitiesKHR capabilities;
   std::vector<VkSurfaceFormatKHR> formats;
   std::vector<VkPresentModeKHR> presentModes;
@@ -96,7 +98,7 @@ public:
   void run() {
     initWindow();
     initVulkan();
-    mainLoop();
+    // mainLoop();
     cleanup();
   }
 
@@ -119,6 +121,7 @@ private:
   VkDevice device;
   VkQueue graphicsQueue;
   VkQueue presentQueue;
+  VkSwapchainKHR swapchain;
 
   void initWindow() {
     glfwInit();
@@ -133,6 +136,7 @@ private:
     createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
+    createSwapchain();
   }
 
   void createInstance() {
@@ -293,8 +297,8 @@ private:
     }
 
     // querying for swap chain support requires extension support (implied by the above if statement)
-    SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
-    if (swapChainSupport.formats.empty() || swapChainSupport.presentModes.empty()) {
+    SwapchainSupportDetails swapchainSupport = querySwapchainSupport(device);
+    if (swapchainSupport.formats.empty() || swapchainSupport.presentModes.empty()) {
       std::cout << "Not suitable!" << std::endl;
       return 0;
     }
@@ -327,8 +331,8 @@ private:
     return requiredExtensions.empty();
   }
 
-  SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
-    SwapChainSupportDetails details;
+  SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device) {
+    SwapchainSupportDetails details;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
 
     uint32_t formatCount;
@@ -418,6 +422,100 @@ private:
     return indices;
   }
 
+  void createSwapchain() {
+    SwapchainSupportDetails swapchainSupport = querySwapchainSupport(physicalDevice);
+
+    VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapchainSupport.formats);
+    VkPresentModeKHR presentMode = chooseSwapPresentMode(swapchainSupport.presentModes);
+    VkExtent2D extent = chooseSwapExtent(swapchainSupport.capabilities);
+
+    const uint32_t maxImageCount = swapchainSupport.capabilities.maxImageCount;
+    const uint32_t prefImageCount = swapchainSupport.capabilities.minImageCount + 1;
+    int imageCount = prefImageCount;
+    if (maxImageCount != 0 && prefImageCount > maxImageCount) {
+      imageCount = maxImageCount;
+    }
+
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = surface;
+    createInfo.minImageCount = imageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = extent;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+    uint32_t queueFamilyIndices[] = {
+      indices.graphicsFamily.value(),
+      indices.presentFamily.value(),
+    };
+
+    if (indices.graphicsFamily != indices.presentFamily) {
+      createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+      createInfo.queueFamilyIndexCount = 2;
+      createInfo.pQueueFamilyIndices = queueFamilyIndices;
+    } else {
+      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      createInfo.queueFamilyIndexCount = 0; // optional
+      createInfo.pQueueFamilyIndices = nullptr; // optional
+    }
+
+    createInfo.preTransform = swapchainSupport.capabilities.currentTransform;
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = VK_TRUE;
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+    if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create swapchain!");
+    }
+  }
+
+  VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &availableFormats) {
+    for (const auto &availableFormat : availableFormats) {
+      if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
+          availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        return availableFormat;
+      }
+    }
+
+    return availableFormats[0];
+  }
+
+  VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
+    for (const auto &availablePresentMode : availablePresentModes) {
+      if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) { // best of both worlds, if energy isn't a problem
+        return availablePresentMode;
+      }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR; // guaranteed to have, best if energy isn't a problem.
+  }
+
+  VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
+    if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+      return capabilities.currentExtent;
+    }
+
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+
+    const VkExtent2D actualExtent = {
+      .width  = std::clamp(
+        static_cast<uint32_t>(width),
+        capabilities.minImageExtent.width,
+        capabilities.maxImageExtent.width
+      ),
+      .height = std::clamp(
+        static_cast<uint32_t>(height),
+        capabilities.minImageExtent.height,
+        capabilities.maxImageExtent.height
+      )
+    };
+    return actualExtent;
+  }
 
   void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
@@ -427,9 +525,9 @@ private:
 
   void cleanup() {
     if (enableValidationLayers) {
-      // TODO: check the validation layers after successfully making a wayland window
-      // DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
+      DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
