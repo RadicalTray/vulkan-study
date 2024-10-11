@@ -85,7 +85,9 @@ private:
   VkExtent2D swapchainExtent;
   std::vector<VkImage> swapchainImages;
   std::vector<VkImageView> swapchainImageViews;
+  VkRenderPass renderPass;
   VkPipelineLayout pipelineLayout;
+  VkPipeline graphicsPipeline;
 
   void initWindow() {
     glfwInit();
@@ -102,6 +104,7 @@ private:
     createLogicalDevice();
     createSwapchain();
     createImageViews();
+    createRenderPass();
     createGraphicsPipeline();
   }
 
@@ -556,6 +559,42 @@ private:
     }
   }
 
+  void createRenderPass() {
+    VkAttachmentDescription colorAttachment = {
+      .format = swapchainImageFormat,
+      .samples = VK_SAMPLE_COUNT_1_BIT,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+      .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+      .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
+
+    VkAttachmentReference colorAttachmentRef = {
+      .attachment = 0,
+      .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    VkSubpassDescription subpass = {
+      .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+      .colorAttachmentCount = 1,
+      .pColorAttachments = &colorAttachmentRef,
+    };
+
+    VkRenderPassCreateInfo renderPassCI = {
+      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+      .attachmentCount = 1,
+      .pAttachments = &colorAttachment,
+      .subpassCount = 1,
+      .pSubpasses = &subpass,
+    };
+
+    if (vkCreateRenderPass(device, &renderPassCI, nullptr, &renderPass) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create render pass!");
+    }
+  }
+
   void createGraphicsPipeline() {
     std::vector<char> vertShaderCode = readFile(PROJECT_ROOT + "shaders/vert.spv");
     std::vector<char> fragShaderCode = readFile(PROJECT_ROOT + "shaders/frag.spv");
@@ -625,7 +664,9 @@ private:
     VkPipelineViewportStateCreateInfo viewportStateCI = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
       .viewportCount = 1,
-      .scissorCount = 1
+      .pViewports = &viewport,
+      .scissorCount = 1,
+      .pScissors = &scissor,
     };
 
     VkPipelineRasterizationStateCreateInfo rastStateCI = {
@@ -674,6 +715,26 @@ private:
       throw std::runtime_error("Failed to create pipeline layout!");
     }
 
+    VkGraphicsPipelineCreateInfo pipelineCI = {
+      .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+      .stageCount = 2,
+      .pStages = shaderStageCIs,
+      .pVertexInputState = &vertInputStateCI,
+      .pInputAssemblyState = &inputAsmStateCI,
+      .pViewportState = &viewportStateCI,
+      .pRasterizationState = &rastStateCI,
+      .pMultisampleState = &msStateCI,
+      .pColorBlendState = &clrBlendStateCI,
+      .pDynamicState = &dynamicStateCI,
+      .layout = pipelineLayout,
+      .renderPass = renderPass,
+      .subpass = 0,
+    };
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create graphics pipelines!");
+    }
+
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
   }
@@ -699,7 +760,9 @@ private:
   }
 
   void cleanup() {
+    vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    vkDestroyRenderPass(device, renderPass, nullptr);
     for (auto imageView : swapchainImageViews) {
       vkDestroyImageView(device, imageView, nullptr);
     }
