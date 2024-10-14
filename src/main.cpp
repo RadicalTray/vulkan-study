@@ -83,11 +83,14 @@ private:
   VkSwapchainKHR swapchain;
   VkFormat swapchainImageFormat;
   VkExtent2D swapchainExtent;
-  std::vector<VkImage> swapchainImages;
-  std::vector<VkImageView> swapchainImageViews;
   VkRenderPass renderPass;
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
+  VkCommandPool commandPool;
+  VkCommandBuffer commandBuffer;
+  std::vector<VkImage> swapchainImages;
+  std::vector<VkImageView> swapchainImageViews;
+  std::vector<VkFramebuffer> swapchainFramebuffers;
 
   void initWindow() {
     glfwInit();
@@ -106,6 +109,9 @@ private:
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createFramebuffers();
+    createCommandPool();
+    createCommandBuffer();
   }
 
   void createInstance() {
@@ -636,20 +642,6 @@ private:
       .primitiveRestartEnable = VK_FALSE
     };
 
-    VkViewport viewport = {
-      .x = 0.0f,
-      .y = 0.0f,
-      .width = (float)swapchainExtent.width,
-      .height = (float)swapchainExtent.height,
-      .minDepth = 0.0f,
-      .maxDepth = 1.0f
-    };
-
-    VkRect2D scissor = {
-      .offset = {0, 0},
-      .extent = swapchainExtent
-    };
-
     std::vector<VkDynamicState> dynamicStates = {
       VK_DYNAMIC_STATE_VIEWPORT,
       VK_DYNAMIC_STATE_SCISSOR
@@ -661,12 +653,12 @@ private:
       .pDynamicStates = dynamicStates.data()
     };
 
+    // viewport and scissor values in this struct are ignored
+    // because we made it dynamic so it only has to be specify at render(?) time
     VkPipelineViewportStateCreateInfo viewportStateCI = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
       .viewportCount = 1,
-      .pViewports = &viewport,
       .scissorCount = 1,
-      .pScissors = &scissor,
     };
 
     VkPipelineRasterizationStateCreateInfo rastStateCI = {
@@ -753,13 +745,118 @@ private:
     return shaderModule;
   }
 
+  void createFramebuffers() {
+    swapchainFramebuffers.resize(swapchainImageViews.size());
+    for (size_t i = 0; i < swapchainImageViews.size(); i++) {
+      VkImageView attachments[] = {
+        swapchainImageViews[i]
+      };
+
+      VkFramebufferCreateInfo framebufferCI = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = renderPass,
+        .attachmentCount = 1,
+        .pAttachments = attachments,
+        .width = swapchainExtent.width,
+        .height = swapchainExtent.height,
+        .layers = 1,
+      };
+
+      if (vkCreateFramebuffer(device, &framebufferCI, nullptr, &swapchainFramebuffers[i]) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create framebuffer!");
+      }
+    }
+  }
+
+  void createCommandPool() {
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+
+    VkCommandPoolCreateInfo poolCI = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+      .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+      .queueFamilyIndex = queueFamilyIndices.graphicsFamily.value(),
+    };
+
+    if (vkCreateCommandPool(device, &poolCI, nullptr, &commandPool) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create command pool!");
+    }
+  }
+
+  void createCommandBuffer() {
+    VkCommandBufferAllocateInfo allocInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .commandPool = commandPool,
+      .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+      .commandBufferCount = 1,
+    };
+
+    if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate command buffers!");
+    }
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+      drawFrame();
+    }
+  }
+
+  void drawFrame() {
+    
+  }
+
+  void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    VkCommandBufferBeginInfo beginInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    };
+
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to begin recording command buffer!");
+    }
+
+    VkRenderPassBeginInfo renderPassInfo = {
+      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+      .renderPass = renderPass,
+      .framebuffer = swapchainFramebuffers[imageIndex],
+      .renderArea = {
+        .offset = { 0, 0 },
+        .extent = swapchainExtent,
+      }
+    };
+
+    VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearColor;
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    VkViewport viewport = {
+      .x = 0.0f,
+      .y = 0.0f,
+      .width = static_cast<float>(swapchainExtent.width),
+      .height = static_cast<float>(swapchainExtent.height),
+      .minDepth = 0.0f,
+      .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    VkRect2D scissor = {
+      .offset = {0, 0},
+      .extent = swapchainExtent,
+    };
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    vkCmdEndRenderPass(commandBuffer);
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to record command buffer!");
     }
   }
 
   void cleanup() {
+    vkDestroyCommandPool(device, commandPool, nullptr);
+    for (auto framebuffer : swapchainFramebuffers) {
+      vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
