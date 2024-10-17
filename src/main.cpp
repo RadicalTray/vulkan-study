@@ -57,7 +57,7 @@ public:
   void run() {
     initWindow();
     initVulkan();
-    // mainLoop();
+    mainLoop();
     cleanup();
   }
 
@@ -71,7 +71,7 @@ private:
                 VkDebugUtilsMessageTypeFlagsEXT messageType,
                 const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                 void *pUserData) {
-    std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
+    std::cerr << "\033[1;31mValidation layer:\033[0m " << pCallbackData->pMessage << std::endl;
     return VK_FALSE;
   }
 
@@ -88,6 +88,8 @@ private:
   VkPipeline graphicsPipeline;
   VkCommandPool commandPool;
   VkCommandBuffer commandBuffer;
+  VkSemaphore imageAvailableSem, renderFinishedSem;
+  VkFence inFlightFence;
   std::vector<VkImage> swapchainImages;
   std::vector<VkImageView> swapchainImageViews;
   std::vector<VkFramebuffer> swapchainFramebuffers;
@@ -112,6 +114,7 @@ private:
     createFramebuffers();
     createCommandPool();
     createCommandBuffer();
+    createSyncObjects();
   }
 
   void createInstance() {
@@ -588,12 +591,23 @@ private:
       .pColorAttachments = &colorAttachmentRef,
     };
 
+    VkSubpassDependency dependency = {
+      .srcSubpass = VK_SUBPASS_EXTERNAL,
+      .dstSubpass = 0,
+      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .srcAccessMask = 0,
+      .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+
     VkRenderPassCreateInfo renderPassCI = {
       .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
       .attachmentCount = 1,
       .pAttachments = &colorAttachment,
       .subpassCount = 1,
       .pSubpasses = &subpass,
+      .dependencyCount = 1,
+      .pDependencies = &dependency,
     };
 
     if (vkCreateRenderPass(device, &renderPassCI, nullptr, &renderPass) != VK_SUCCESS) {
@@ -795,6 +809,21 @@ private:
     }
   }
 
+  void createSyncObjects() {
+    VkSemaphoreCreateInfo semaphoreCI = {
+      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    VkFenceCreateInfo fenceCI = {
+      .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+    };
+    if (vkCreateSemaphore(device, &semaphoreCI, nullptr, &imageAvailableSem) != VK_SUCCESS ||
+        vkCreateSemaphore(device, &semaphoreCI, nullptr, &renderFinishedSem) != VK_SUCCESS ||
+        vkCreateFence(device, &fenceCI, nullptr, &inFlightFence) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create semaphores and fences!");
+    }
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
@@ -803,7 +832,42 @@ private:
   }
 
   void drawFrame() {
-    
+    vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &inFlightFence);
+
+    uint32_t imageIdx;
+    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSem, VK_NULL_HANDLE, &imageIdx);
+
+    vkResetCommandBuffer(commandBuffer, 0);
+    recordCommandBuffer(commandBuffer, imageIdx);
+
+    VkSemaphore waitSemaphores[] = {imageAvailableSem};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore signalSemaphores[] = {renderFinishedSem};
+    VkSubmitInfo submitInfo = {
+      .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      .waitSemaphoreCount = 1,
+      .pWaitSemaphores = waitSemaphores,
+      .pWaitDstStageMask = waitStages,
+      .commandBufferCount = 1,
+      .pCommandBuffers = &commandBuffer,
+      .signalSemaphoreCount = 1,
+      .pSignalSemaphores = signalSemaphores,
+    };
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to submit draw command buffer!");
+    }
+
+    VkSwapchainKHR swapchains[] = {swapchain};
+    VkPresentInfoKHR presentInfo = {
+      .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+      .waitSemaphoreCount = 1,
+      .pWaitSemaphores = signalSemaphores,
+      .swapchainCount = 1,
+      .pSwapchains = swapchains,
+      .pImageIndices = &imageIdx,
+    };
+    vkQueuePresentKHR(presentQueue, &presentInfo);
   }
 
   void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
@@ -853,6 +917,9 @@ private:
   }
 
   void cleanup() {
+    vkDestroySemaphore(device, imageAvailableSem, nullptr);
+    vkDestroySemaphore(device, renderFinishedSem, nullptr);
+    vkDestroyFence(device, inFlightFence, nullptr);
     vkDestroyCommandPool(device, commandPool, nullptr);
     for (auto framebuffer : swapchainFramebuffers) {
       vkDestroyFramebuffer(device, framebuffer, nullptr);
