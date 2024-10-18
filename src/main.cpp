@@ -845,7 +845,6 @@ private:
 
   void drawFrame() {
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-    vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
     uint32_t imageIdx;
     VkResult result =
@@ -859,6 +858,10 @@ private:
       recreateSwapchain();
       return;
     }
+
+    // only reset the fence if we are submitting work
+    vkResetFences(device, 1, &inFlightFences[currentFrame]);
+    // NOTE: to self, can't you just put this before trying to signal the fence?
 
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIdx);
