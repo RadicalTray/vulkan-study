@@ -964,8 +964,19 @@ private:
   }
 
   void recreateSwapchain() {
-    // TODO: don't wait for device to stop all rendering before creating the new swapchain
     std::print("Recreating swapchain...\n");
+
+    // handle window minimization
+    int width = 0, height = 0;
+    // in case the size is already correct and glfwWaitEvents() would have nothing to wait on (???)
+    glfwGetFramebufferSize(window, &width, &height);
+
+    while (width == 0 || height == 0) {
+      glfwGetFramebufferSize(window, &width, &height);
+      glfwWaitEvents();
+    }
+
+    // TODO: don't wait for device to stop all rendering before creating the new swapchain
     vkDeviceWaitIdle(device);
     cleanupSwapchain();
     createSwapchain();
