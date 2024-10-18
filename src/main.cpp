@@ -155,9 +155,9 @@ private:
     vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount,
                                            availableExtensions.data());
 
-    std::cout << "Available extensions:" << std::endl;
+    std::println("Available extensions:");
     for (const auto &extension : availableExtensions) {
-      std::cout << '\t' << extension.extensionName << '\n';
+      std::println("\t{}", extension.extensionName);
     }
 
     // placed outside of the if statement so it isn't destroyed before the
@@ -205,7 +205,7 @@ private:
       }
     }
 
-    std::cout << "Validation layers support checked!" << std::endl;
+    std::println("Validation layers support checked!");
     return true;
   }
 
@@ -230,8 +230,7 @@ private:
         }
       }
       if (!found) {
-        std::cout << "[ERROR]: extension: " << requiredExtensionName
-                  << " not supported by Vulkan." << std::endl;
+        std::println("[ERROR]: extension: {} not supported by Vulkan.", requiredExtensionName);
       }
     }
 
@@ -295,7 +294,7 @@ private:
 
     std::multimap<int, VkPhysicalDevice> candidates;
 
-    std::cout << "Rating devices..." << std::endl;
+    std::println("Rating devices...");
     for (const auto &device : devices) {
       int score = rateDevice(device);
       candidates.insert({ score, device });
@@ -317,17 +316,17 @@ private:
 
     const QueueFamilyIndices indices = findQueueFamilies(device);
 
-    std::cout << "Device: " << deviceProperties.deviceName << std::endl;
+    std::println("Device: {}", deviceProperties.deviceName);
 
     if (!deviceExtensionsSupport(device) || !deviceFeatures.geometryShader || !indices.isComplete()) {
-      std::cout << "Not suitable!" << std::endl;
+      std::println("Not suitable!");
       return 0;
     }
 
     // querying for swap chain support requires extension support (implied by the above if statement)
     SwapchainSupportDetails swapchainSupport = querySwapchainSupport(device);
     if (swapchainSupport.formats.empty() || swapchainSupport.presentModes.empty()) {
-      std::cout << "Not suitable!" << std::endl;
+      std::println("Not suitable!");
       return 0;
     }
 
@@ -339,7 +338,7 @@ private:
 
     score += deviceProperties.limits.maxImageDimension2D;
 
-    std::cout << "Score: " << score << std::endl;
+    std::println("Score: {}", score);
     return score;
   }
 
@@ -350,9 +349,9 @@ private:
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
 
     std::set<std::string> requiredExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
-    std::cout << "Supported extensions:" << std::endl;
+    std::println("Supported extensions:");
     for (const auto &extension : availableExtensions) {
-      std::cout << "\t" << extension.extensionName << std::endl;
+      std::println("\t{}", extension.extensionName);
       requiredExtensions.erase(extension.extensionName);
     }
 
@@ -964,7 +963,7 @@ private:
   }
 
   void recreateSwapchain() {
-    std::print("Recreating swapchain...\n");
+    std::println("Recreating swapchain...");
 
     // handle window minimization
     int width = 0, height = 0;
