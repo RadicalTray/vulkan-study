@@ -9,7 +9,7 @@ DEPS := $(OBJS:.o=.d)
 
 INC_DIRS := $(shell find $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
-CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++17 -O2 -Wall
+CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++23 -O2 -Wall
 
 LDFLAGS := $(shell pkg-config --cflags --libs glfw3 vulkan)
 

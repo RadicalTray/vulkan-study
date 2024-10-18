@@ -5,6 +5,7 @@
 #include <set>
 #include <optional>
 #include <iostream>
+#include <print>
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
@@ -100,7 +101,7 @@ private:
   void initWindow() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     window = glfwCreateWindow(WIDTH, HEIGHT, "VULKAN", nullptr, nullptr);
   }
 
@@ -451,20 +452,21 @@ private:
 
     const uint32_t maxImageCount = swapchainSupport.capabilities.maxImageCount;
     const uint32_t prefImageCount = swapchainSupport.capabilities.minImageCount + 1;
-    int imageCount = prefImageCount;
+    uint32_t imageCount = prefImageCount;
     if (maxImageCount != 0 && prefImageCount > maxImageCount) {
       imageCount = maxImageCount;
     }
 
-    VkSwapchainCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = surface;
-    createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = surfaceFormat.format;
-    createInfo.imageColorSpace = surfaceFormat.colorSpace;
-    createInfo.imageExtent = extent;
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    VkSwapchainCreateInfoKHR createInfo = {
+      .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+      .surface = surface,
+      .minImageCount = imageCount,
+      .imageFormat = surfaceFormat.format,
+      .imageColorSpace = surfaceFormat.colorSpace,
+      .imageExtent = extent,
+      .imageArrayLayers = 1,
+      .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    };
 
     QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
     uint32_t queueFamilyIndices[] = {
@@ -486,7 +488,7 @@ private:
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     createInfo.presentMode = presentMode;
     createInfo.clipped = VK_TRUE;
-    createInfo.oldSwapchain = VK_NULL_HANDLE;
+    createInfo.oldSwapchain = swapchain;
 
     if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS) {
       throw std::runtime_error("Failed to create swapchain!");
@@ -846,7 +848,17 @@ private:
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
     uint32_t imageIdx;
-    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSems[currentFrame], VK_NULL_HANDLE, &imageIdx);
+    VkResult result =
+      vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSems[currentFrame], VK_NULL_HANDLE, &imageIdx);
+    // can also choose to recreate the swapchain now when it is suboptimal,
+    // but the image is still presentable when the swapchain is just suboptimal
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      throw std::runtime_error("Failed to acquire swapchain image!");
+    }
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) { // the image is no longer presentable
+      recreateSwapchain();
+      return;
+    }
 
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIdx);
@@ -877,7 +889,16 @@ private:
       .pSwapchains = swapchains,
       .pImageIndices = &imageIdx,
     };
-    vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    result = vkQueuePresentKHR(presentQueue, &presentInfo);
+    if (result != VK_SUCCESS) {
+      throw std::runtime_error("Failed to present swapchain image!");
+    }
+    // for the best possible result, also recreate the swapchain when it is suboptimal
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+      recreateSwapchain();
+    }
+
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 
@@ -927,6 +948,29 @@ private:
     }
   }
 
+  void recreateSwapchain() {
+    // TODO: don't wait for device to stop all rendering before creating the new swapchain
+    std::print("Recreating swapchain...\n");
+    vkDeviceWaitIdle(device);
+    cleanupSwapchain();
+    createSwapchain();
+    createImageViews();
+    createFramebuffers();
+    // render pass might also need to be recreated
+    // eg. when moving the window from sdr monitor to hdr monitor
+    //  and the image format is changed.
+  }
+
+  void cleanupSwapchain() {
+    for (auto framebuffer : swapchainFramebuffers) {
+      vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
+    for (auto imageView : swapchainImageViews) {
+      vkDestroyImageView(device, imageView, nullptr);
+    }
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
+  }
+
   void cleanup() {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       vkDestroySemaphore(device, imageAvailableSems[i], nullptr);
@@ -934,19 +978,13 @@ private:
       vkDestroyFence(device, inFlightFences[i], nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);
-    for (auto framebuffer : swapchainFramebuffers) {
-      vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
-    for (auto imageView : swapchainImageViews) {
-      vkDestroyImageView(device, imageView, nullptr);
-    }
+    cleanupSwapchain();
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
