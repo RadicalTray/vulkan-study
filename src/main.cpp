@@ -97,12 +97,22 @@ private:
   std::vector<VkImage> swapchainImages;
   std::vector<VkImageView> swapchainImageViews;
   std::vector<VkFramebuffer> swapchainFramebuffers;
+  bool framebufferResized = false;
 
   void initWindow() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
     window = glfwCreateWindow(WIDTH, HEIGHT, "VULKAN", nullptr, nullptr);
+
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+  }
+
+  static void framebufferResizeCallback(GLFWwindow *window, int width, int height) {
+    auto app = reinterpret_cast<HelloTriangleApplication *>(glfwGetWindowUserPointer(window));
+    app->framebufferResized = true;
   }
 
   void initVulkan() {
@@ -488,7 +498,7 @@ private:
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     createInfo.presentMode = presentMode;
     createInfo.clipped = VK_TRUE;
-    createInfo.oldSwapchain = swapchain;
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
 
     if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS) {
       throw std::runtime_error("Failed to create swapchain!");
@@ -898,8 +908,10 @@ private:
       throw std::runtime_error("Failed to present swapchain image!");
     }
     // for the best possible result, also recreate the swapchain when it is suboptimal
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    // recreate swapchain after vkQueuePresentKHR to ensure the semaphores are in a consistent state
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
       recreateSwapchain();
+      framebufferResized = false;
     }
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
