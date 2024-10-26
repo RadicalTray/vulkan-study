@@ -16,6 +16,7 @@
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
 #include "helper.hpp"
 
@@ -25,14 +26,14 @@ constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-const std::vector<const char*> requiredDeviceExtensions = {
-  VK_KHR_SWAPCHAIN_EXTENSION_NAME
+const std::vector<Vertex> vertices = {
+  {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+  {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+  {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
 };
 
-struct SwapchainSupportDetails {
-  VkSurfaceCapabilitiesKHR capabilities;
-  std::vector<VkSurfaceFormatKHR> formats;
-  std::vector<VkPresentModeKHR> presentModes;
+const std::vector<const char*> requiredDeviceExtensions = {
+  VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 const std::vector<const char*> validationLayers = {
@@ -44,15 +45,6 @@ constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif
-
-struct QueueFamilyIndices {
-  std::optional<uint32_t> graphicsFamily;
-  std::optional<uint32_t> presentFamily;
-
-  bool isComplete() const {
-    return graphicsFamily.has_value() && presentFamily.has_value();
-  }
-};
 
 class HelloTriangleApplication {
 public:
@@ -656,12 +648,14 @@ private:
       fragShaderStageCI
     };
 
+    auto bindDesc = Vertex::getBindingDescription();
+    auto attrDesc = Vertex::getAttributeDescriptions();
     VkPipelineVertexInputStateCreateInfo vertInputStateCI = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexBindingDescriptionCount = 0,
-      .pVertexBindingDescriptions = nullptr,
-      .vertexAttributeDescriptionCount = 0,
-      .pVertexAttributeDescriptions = nullptr
+      .vertexBindingDescriptionCount = 1,
+      .pVertexBindingDescriptions = &bindDesc,
+      .vertexAttributeDescriptionCount = static_cast<uint32_t>(attrDesc.size()),
+      .pVertexAttributeDescriptions = attrDesc.data(),
     };
 
     VkPipelineInputAssemblyStateCreateInfo inputAsmStateCI = {
