@@ -27,7 +27,7 @@ constexpr uint32_t HEIGHT = 600;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<Vertex> vertices = {
-  {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+  {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
   {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
   {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
 };
@@ -81,6 +81,8 @@ private:
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
   VkCommandPool commandPool;
+  VkBuffer vertexBuffer;
+  VkDeviceMemory vertexBufferMem;
 
   uint32_t currentFrame = 0;
   std::vector<VkCommandBuffer> commandBuffers;
@@ -119,6 +121,7 @@ private:
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createVertexBuffer();
     createCommandBuffers();
     createSyncObjects();
   }
@@ -804,6 +807,54 @@ private:
     }
   }
 
+  void createVertexBuffer() {
+    const VkBufferCreateInfo bufferCI = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = sizeof(vertices[0]) * vertices.size(),
+      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    if (vkCreateBuffer(device, &bufferCI, nullptr, &vertexBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create vertex buffer!");
+    }
+
+    VkMemoryRequirements memReq;
+    vkGetBufferMemoryRequirements(device, vertexBuffer, &memReq);
+
+    const VkMemoryAllocateInfo allocInfo = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = memReq.size,
+      .memoryTypeIndex = findMemoryType(memReq.memoryTypeBits,
+                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+    };
+
+    if (vkAllocateMemory(device, &allocInfo, nullptr, &vertexBufferMem) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate vertex buffer memory!");
+    }
+    vkBindBufferMemory(device, vertexBuffer, vertexBufferMem, 0);
+
+    void *pData;
+    vkMapMemory(device, vertexBufferMem, 0, bufferCI.size, 0, &pData);
+    memcpy(pData, vertices.data(), (size_t) bufferCI.size);
+    vkUnmapMemory(device, vertexBufferMem);
+  }
+
+  uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties memProps;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+      if ((typeFilter & (1 << i)) &&
+          (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
+        return i;
+      }
+    }
+
+    throw std::runtime_error("Failed to find suitable memory type!");
+  }
+
   void createCommandBuffers() {
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo = {
@@ -935,6 +986,11 @@ private:
 
     vkCmdBeginRenderPass(commandBuffers[currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    VkBuffer vertexBuffers[] = {vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+
     VkViewport viewport = {
       .x = 0.0f,
       .y = 0.0f,
@@ -944,13 +1000,16 @@ private:
       .maxDepth = 1.0f,
     };
     vkCmdSetViewport(commandBuffers[currentFrame], 0, 1, &viewport);
+
     VkRect2D scissor = {
       .offset = {0, 0},
       .extent = swapchainExtent,
     };
     vkCmdSetScissor(commandBuffers[currentFrame], 0, 1, &scissor);
-    vkCmdDraw(commandBuffers[currentFrame], 3, 1, 0, 0);
+
+    vkCmdDraw(commandBuffers[currentFrame], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
     vkCmdEndRenderPass(commandBuffers[currentFrame]);
+
     if (vkEndCommandBuffer(commandBuffers[currentFrame]) != VK_SUCCESS) {
       throw std::runtime_error("Failed to record command buffer!");
     }
@@ -1001,6 +1060,8 @@ private:
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
     cleanupSwapchain();
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+    vkFreeMemory(device, vertexBufferMem, nullptr);
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
