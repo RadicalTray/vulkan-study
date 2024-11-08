@@ -3,8 +3,8 @@
 #include <fstream>
 #include <cstdint>
 
-std::vector<char> readFile(const std::string &filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
+std::vector<char> readFile(const std::string &filepath) {
+  std::ifstream file(filepath, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Failed to open file!");
   }

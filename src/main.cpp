@@ -20,8 +20,6 @@
 
 #include "helper.hpp"
 
-const std::string PROJECT_ROOT = "/home/luna/Works/side/vk-practice/";
-
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
@@ -633,8 +631,8 @@ private:
   }
 
   void createGraphicsPipeline() {
-    std::vector<char> vertShaderCode = readFile(PROJECT_ROOT + "shaders/vert.spv");
-    std::vector<char> fragShaderCode = readFile(PROJECT_ROOT + "shaders/frag.spv");
+    std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
+    std::vector<char> fragShaderCode = readFile("shaders/frag.spv");
 
     // NOTE: freed after the graphics pipeline is created
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
