@@ -11,12 +11,15 @@
 #include <cstring>
 #include <limits>
 #include <algorithm>
+#include <chrono>
 
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "helper.hpp"
 
@@ -81,6 +84,7 @@ private:
   VkFormat swapchainImageFormat;
   VkExtent2D swapchainExtent;
   VkRenderPass renderPass;
+  VkDescriptorSetLayout descriptorSetLayout;
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
   VkCommandPool commandPool;
@@ -88,6 +92,10 @@ private:
   VkDeviceMemory vertexBufMem;
   VkBuffer indexBuf;
   VkDeviceMemory indexBufMem;
+
+  std::vector<VkBuffer> uniformBufs;
+  std::vector<VkDeviceMemory> uniformBufMems;
+  std::vector<void*> uniformBufsMapped;
 
   uint32_t currentFrame = 0;
   std::vector<VkCommandBuffer> commandBuffers;
@@ -123,11 +131,13 @@ private:
     createSwapchain();
     createImageViews();
     createRenderPass();
+    createDescriptorSetLayout();
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
     createVertexBuffer();
     createIndexBuffer();
+    createUniformBuffers();
     createCommandBuffers();
     createSyncObjects();
   }
@@ -490,8 +500,6 @@ private:
       createInfo.pQueueFamilyIndices = queueFamilyIndices;
     } else {
       createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-      createInfo.queueFamilyIndexCount = 0; // optional
-      createInfo.pQueueFamilyIndices = nullptr; // optional
     }
 
     createInfo.preTransform = swapchainSupport.capabilities.currentTransform;
@@ -630,6 +638,25 @@ private:
     }
   }
 
+  void createDescriptorSetLayout() {
+    VkDescriptorSetLayoutBinding uboLayoutBinding = {
+      .binding = 0,
+      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .descriptorCount = 1,
+      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+    };
+
+    VkDescriptorSetLayoutCreateInfo layoutCI = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .bindingCount = 1,
+      .pBindings = &uboLayoutBinding,
+    };
+
+    if (vkCreateDescriptorSetLayout(device, &layoutCI, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create descriptor set layout!");
+    }
+  }
+
   void createGraphicsPipeline() {
     std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
     std::vector<char> fragShaderCode = readFile("shaders/frag.spv");
@@ -732,6 +759,8 @@ private:
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .setLayoutCount = 1,
+      .pSetLayouts = &descriptorSetLayout,
     };
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout) != VK_SUCCESS) {
@@ -945,6 +974,23 @@ private:
     vkFreeMemory(device, stagingBufMem, nullptr);
   }
 
+  void createUniformBuffers() {
+    VkDeviceSize bufSize = sizeof(UniformBufferObject);
+
+    uniformBufs.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBufMems.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBufsMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+      createBuffer(bufSize,
+                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                   uniformBufs[i],
+                   uniformBufMems[i]);
+      vkMapMemory(device, uniformBufMems[i], 0, bufSize, 0, &uniformBufsMapped[i]);
+    }
+  }
+
   void createCommandBuffers() {
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo = {
@@ -1009,6 +1055,8 @@ private:
 
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIdx);
+
+    updateUniformBuffers(currentFrame);
 
     VkSemaphore waitSemaphores[] = {imageAvailableSems[currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
@@ -1107,6 +1155,20 @@ private:
     }
   }
 
+  void updateUniformBuffers(uint32_t currentImage) {
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo = {
+      .model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+      .view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+      .proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 10.0f),
+    };
+    ubo.proj[1][1] *= -1; // invert back Y clip coords from glm because they were inverted for opengl
+    memcpy(uniformBufsMapped[currentImage], &ubo, sizeof(ubo));
+  }
+
   void recreateSwapchain() {
     std::println("Recreating swapchain...");
 
@@ -1151,11 +1213,16 @@ private:
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     cleanupSwapchain();
     vkDestroyBuffer(device, vertexBuf, nullptr);
     vkFreeMemory(device, vertexBufMem, nullptr);
     vkDestroyBuffer(device, indexBuf, nullptr);
     vkFreeMemory(device, indexBufMem, nullptr);
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+      vkDestroyBuffer(device, uniformBufs[i], nullptr);
+      vkFreeMemory(device, uniformBufMems[i], nullptr);
+    }
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
