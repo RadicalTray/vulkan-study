@@ -7,11 +7,17 @@ SRCS := $(shell find $(SRC_DIRS) -name '*.cpp' -or -name '*.c' -or -name '*.s')
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 
+SHADERS_DIR := shaders
+SHADERS := $(shell find $(SHADERS_DIR) -name 'shader.*')
+TARGET_SHADERS := $(SHADERS:$(SHADERS_DIR)/shader.%=$(BUILD_DIR)/shaders/%.spv)
+
 INC_DIRS := $(shell find $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++23 -O2 -Wall
 
 LDFLAGS := $(shell pkg-config --cflags --libs glfw3 vulkan)
+
+all: $(BUILD_DIR)/$(TARGET_EXEC) shaders
 
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
 	$(CXX) $(OBJS) -o $@ $(LDFLAGS)
@@ -24,8 +30,15 @@ $(BUILD_DIR)/%.cpp.o: %.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
+.PHONY: shaders
+shaders: $(TARGET_SHADERS)
+
+$(BUILD_DIR)/shaders/%.spv: $(SHADERS_DIR)/shader.%
+	mkdir -p $(dir $@)
+	glslc $< -o $@
+
 .PHONY: test
-test: $(BUILD_DIR)/$(TARGET_EXEC)
+test: all
 	./build/VulkanTest
 
 .PHONY: clean

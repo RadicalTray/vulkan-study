@@ -85,6 +85,8 @@ private:
   VkExtent2D swapchainExtent;
   VkRenderPass renderPass;
   VkDescriptorSetLayout descriptorSetLayout;
+  VkDescriptorPool descriptorPool;
+  std::vector<VkDescriptorSet> descriptorSets;
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
   VkCommandPool commandPool;
@@ -138,6 +140,8 @@ private:
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
   }
@@ -658,8 +662,8 @@ private:
   }
 
   void createGraphicsPipeline() {
-    std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
-    std::vector<char> fragShaderCode = readFile("shaders/frag.spv");
+    std::vector<char> vertShaderCode = readFile("build/shaders/vert.spv");
+    std::vector<char> fragShaderCode = readFile("build/shaders/frag.spv");
 
     // NOTE: freed after the graphics pipeline is created
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
@@ -725,7 +729,8 @@ private:
       .rasterizerDiscardEnable = VK_FALSE,
       .polygonMode = VK_POLYGON_MODE_FILL,
       .cullMode = VK_CULL_MODE_BACK_BIT,
-      .frontFace = VK_FRONT_FACE_CLOCKWISE,
+      // from inverting the Y clip coords in projection matrix, we're rendering counter clockwise
+      .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
       .depthBiasEnable = VK_FALSE,
       .lineWidth = 1.0f,
     };
@@ -991,6 +996,56 @@ private:
     }
   }
 
+  void createDescriptorPool() {
+    VkDescriptorPoolSize poolSize = {
+      .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+    };
+    VkDescriptorPoolCreateInfo poolCI = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+      .poolSizeCount = 1,
+      .pPoolSizes = &poolSize,
+    };
+
+    if (vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create descriptor pool");
+    }
+  }
+
+  void createDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .descriptorPool = descriptorPool,
+      .descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+      .pSetLayouts = layouts.data(),
+    };
+
+    descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate descriptor sets");
+    }
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+      VkDescriptorBufferInfo bufInfo = {
+        .buffer = uniformBufs[i],
+        .offset = 0,
+        .range = sizeof(UniformBufferObject),
+      };
+      VkWriteDescriptorSet descriptorWrite = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptorSets[i],
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .pBufferInfo = &bufInfo,
+      };
+      vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+    }
+  }
+
   void createCommandBuffers() {
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo = {
@@ -1049,10 +1104,6 @@ private:
       return;
     }
 
-    // only reset the fence if we are submitting work
-    vkResetFences(device, 1, &inFlightFences[currentFrame]);
-    // NOTE: to self, can't you just put this before trying to signal the fence?
-
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIdx);
 
@@ -1071,6 +1122,8 @@ private:
       .signalSemaphoreCount = 1,
       .pSignalSemaphores = signalSemaphores,
     };
+
+    vkResetFences(device, 1, &inFlightFences[currentFrame]); // only reset the fence if we are submitting work
     if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
       throw std::runtime_error("Failed to submit draw command buffer!");
     }
@@ -1104,7 +1157,7 @@ private:
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
     };
 
-    if (vkBeginCommandBuffer(commandBuffers[currentFrame], &beginInfo) != VK_SUCCESS) {
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
       throw std::runtime_error("Failed to begin recording command buffer!");
     }
 
@@ -1122,14 +1175,14 @@ private:
     renderPassInfo.clearValueCount = 1;
     renderPassInfo.pClearValues = &clearColor;
 
-    vkCmdBeginRenderPass(commandBuffers[currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
     VkBuffer vertexBuffers[] = {vertexBuf};
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-    vkCmdBindIndexBuffer(commandBuffers[currentFrame], indexBuf, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuf, 0, VK_INDEX_TYPE_UINT16);
 
     VkViewport viewport = {
       .x = 0.0f,
@@ -1139,18 +1192,29 @@ private:
       .minDepth = 0.0f,
       .maxDepth = 1.0f,
     };
-    vkCmdSetViewport(commandBuffers[currentFrame], 0, 1, &viewport);
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
     VkRect2D scissor = {
       .offset = {0, 0},
       .extent = swapchainExtent,
     };
-    vkCmdSetScissor(commandBuffers[currentFrame], 0, 1, &scissor);
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-    vkCmdEndRenderPass(commandBuffers[currentFrame]);
+    vkCmdBindDescriptorSets(
+      commandBuffer,
+      VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelineLayout,
+      0,
+      1,
+      &descriptorSets[currentFrame],
+      0,
+      nullptr
+    );
 
-    if (vkEndCommandBuffer(commandBuffers[currentFrame]) != VK_SUCCESS) {
+    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+    vkCmdEndRenderPass(commandBuffer);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
       throw std::runtime_error("Failed to record command buffer!");
     }
   }
@@ -1161,9 +1225,22 @@ private:
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     UniformBufferObject ubo = {
-      .model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-      .view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-      .proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 10.0f),
+      .model = glm::rotate(
+        glm::mat4(1.0f),
+        time * glm::radians(90.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f)
+      ),
+      .view = glm::lookAt(
+        glm::vec3(2.0f, 2.0f, 2.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f)
+      ),
+      .proj = glm::perspective(
+        glm::radians(45.0f),
+        swapchainExtent.width / (float)swapchainExtent.height,
+        0.1f,
+        10.0f
+      ),
     };
     ubo.proj[1][1] *= -1; // invert back Y clip coords from glm because they were inverted for opengl
     memcpy(uniformBufsMapped[currentImage], &ubo, sizeof(ubo));
@@ -1213,6 +1290,7 @@ private:
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     cleanupSwapchain();
     vkDestroyBuffer(device, vertexBuf, nullptr);
