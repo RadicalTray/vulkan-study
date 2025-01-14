@@ -15,7 +15,7 @@ CXX := clang++
 
 INC_DIRS := $(shell find $(SRC_DIRS) -type d) /usr/include/stb
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
-CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++23 -Wall
+CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++23 -Wall -g
 
 LDFLAGS := $(shell pkg-config --cflags --libs glfw3 vulkan)
 
