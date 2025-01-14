@@ -3,10 +3,8 @@
 #include <vector>
 #include <map>
 #include <set>
-#include <optional>
 #include <iostream>
 #include <print>
-#include <fstream>
 #include <stdexcept>
 #include <cstring>
 #include <limits>
@@ -20,7 +18,9 @@
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -33,14 +33,20 @@ constexpr uint32_t HEIGHT = 600;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<Vertex> vertices = {
-  {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-  {{0.5f, -0.5f},  {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-  {{0.5f, 0.5f},   {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-  {{-0.5f, 0.5f},  {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
+  {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+  {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+  {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+  {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+
+  {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+  {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+  {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+  {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
 };
 
 const std::vector<uint16_t> indices = {
-  0, 1, 2, 2, 3, 0
+  0, 1, 2, 2, 3, 0,
+  4, 5, 6, 6, 7, 4,
 };
 
 const std::vector<const char*> requiredDeviceExtensions = {
@@ -81,36 +87,44 @@ private:
   }
 
   VkSurfaceKHR surface;
+
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   VkDevice device;
+
   VkQueue graphicsQueue;
   VkQueue presentQueue;
+
   VkSwapchainKHR swapchain;
   VkFormat swapchainImageFormat;
   VkExtent2D swapchainExtent;
+
   VkRenderPass renderPass;
+
   VkDescriptorSetLayout descriptorSetLayout;
   VkDescriptorPool descriptorPool;
   std::vector<VkDescriptorSet> descriptorSets;
+
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
   VkCommandPool commandPool;
-  VkImage textureImg;
-  VkDeviceMemory textureImgMem;
-  VkImageView textureImgView;
-  VkSampler textureSampler;
-  VkBuffer vertexBuf;
-  VkDeviceMemory vertexBufMem;
-  VkBuffer indexBuf;
-  VkDeviceMemory indexBufMem;
 
-  std::vector<VkBuffer> uniformBufs;
-  std::vector<VkDeviceMemory> uniformBufMems;
-  std::vector<void*> uniformBufsMapped;
+  VkImage textureImage;
+  VkDeviceMemory textureImageMemory;
+  VkImageView textureImageView;
+  VkSampler textureSampler;
+
+  VkBuffer vertexBuffer;
+  VkDeviceMemory vertexBufferMemory;
+  VkBuffer indexBuffer;
+  VkDeviceMemory indexBufferMemory;
+
+  std::vector<VkBuffer> uniformBuffers;
+  std::vector<VkDeviceMemory> uniformBufferMemories;
+  std::vector<void*> uniformBuffersMapped;
 
   uint32_t currentFrame = 0;
   std::vector<VkCommandBuffer> commandBuffers;
-  std::vector<VkSemaphore> imageAvailableSems, renderFinishedSems;
+  std::vector<VkSemaphore> imageAvailableSemaphores, renderFinishedSemaphores;
   std::vector<VkFence> inFlightFences;
   std::vector<VkImage> swapchainImages;
   std::vector<VkImageView> swapchainImageViews;
@@ -882,23 +896,23 @@ private:
       VK_IMAGE_TILING_OPTIMAL,
       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      textureImg,
-      textureImgMem
+      textureImage,
+      textureImageMemory
     );
     transitionImageLayout(
-      textureImg,
+      textureImage,
       VK_FORMAT_R8G8B8A8_SRGB,
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
     copyBufferToImage(
       stagingBuf,
-      textureImg,
+      textureImage,
       static_cast<uint32_t>(texWidth),
       static_cast<uint32_t>(texHeight)
     );
     transitionImageLayout(
-      textureImg,
+      textureImage,
       VK_FORMAT_R8G8B8A8_SRGB,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -1028,7 +1042,7 @@ private:
   }
 
   void createTextureImageView() {
-    textureImgView = createImageView(textureImg, VK_FORMAT_R8G8B8A8_SRGB);
+    textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
   }
 
   VkImageView createImageView(VkImage image, VkFormat format) {
@@ -1100,9 +1114,9 @@ private:
     createBuffer(bufSize,
                  VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 vertexBuf,
-                 vertexBufMem);
-    copyBuffer(stagingBuf, vertexBuf, bufSize);
+                 vertexBuffer,
+                 vertexBufferMemory);
+    copyBuffer(stagingBuf, vertexBuffer, bufSize);
     vkDestroyBuffer(device, stagingBuf, nullptr);
     vkFreeMemory(device, stagingBufMem, nullptr);
   }
@@ -1215,10 +1229,10 @@ private:
     createBuffer(bufSize,
                  VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 indexBuf,
-                 indexBufMem);
+                 indexBuffer,
+                 indexBufferMemory);
 
-    copyBuffer(stagingBuf, indexBuf, bufSize);
+    copyBuffer(stagingBuf, indexBuffer, bufSize);
 
     vkDestroyBuffer(device, stagingBuf, nullptr);
     vkFreeMemory(device, stagingBufMem, nullptr);
@@ -1227,17 +1241,17 @@ private:
   void createUniformBuffers() {
     VkDeviceSize bufSize = sizeof(UniformBufferObject);
 
-    uniformBufs.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBufMems.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBufsMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBufferMemories.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       createBuffer(bufSize,
                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                   uniformBufs[i],
-                   uniformBufMems[i]);
-      vkMapMemory(device, uniformBufMems[i], 0, bufSize, 0, &uniformBufsMapped[i]);
+                   uniformBuffers[i],
+                   uniformBufferMemories[i]);
+      vkMapMemory(device, uniformBufferMemories[i], 0, bufSize, 0, &uniformBuffersMapped[i]);
     }
   }
 
@@ -1276,13 +1290,13 @@ private:
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       VkDescriptorBufferInfo bufInfo = {
-        .buffer = uniformBufs[i],
+        .buffer = uniformBuffers[i],
         .offset = 0,
         .range = sizeof(UniformBufferObject),
       };
       VkDescriptorImageInfo imgInfo = {
         .sampler = textureSampler,
-        .imageView = textureImgView,
+        .imageView = textureImageView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
       };
       std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
@@ -1322,8 +1336,8 @@ private:
   }
 
   void createSyncObjects() {
-    imageAvailableSems.resize(MAX_FRAMES_IN_FLIGHT);
-    renderFinishedSems.resize(MAX_FRAMES_IN_FLIGHT);
+    imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
     VkSemaphoreCreateInfo semaphoreCI = {
       .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -1333,8 +1347,8 @@ private:
       .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-      if (vkCreateSemaphore(device, &semaphoreCI, nullptr, &imageAvailableSems[i]) != VK_SUCCESS ||
-          vkCreateSemaphore(device, &semaphoreCI, nullptr, &renderFinishedSems[i]) != VK_SUCCESS ||
+      if (vkCreateSemaphore(device, &semaphoreCI, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+          vkCreateSemaphore(device, &semaphoreCI, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
           vkCreateFence(device, &fenceCI, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create sync objects!");
       }
@@ -1354,7 +1368,7 @@ private:
 
     uint32_t imageIdx;
     VkResult result =
-      vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSems[currentFrame], VK_NULL_HANDLE, &imageIdx);
+      vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIdx);
     // can also choose to recreate the swapchain now when it is suboptimal,
     // but the image is still presentable when the swapchain is just suboptimal
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
@@ -1370,9 +1384,9 @@ private:
 
     updateUniformBuffers(currentFrame);
 
-    VkSemaphore waitSemaphores[] = {imageAvailableSems[currentFrame]};
+    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSemaphore signalSemaphores[] = {renderFinishedSems[currentFrame]};
+    VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
     VkSubmitInfo submitInfo = {
       .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
       .waitSemaphoreCount = 1,
@@ -1439,11 +1453,11 @@ private:
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-    VkBuffer vertexBuffers[] = {vertexBuf};
+    VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-    vkCmdBindIndexBuffer(commandBuffer, indexBuf, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
     VkViewport viewport = {
       .x = 0.0f,
@@ -1504,7 +1518,7 @@ private:
       ),
     };
     ubo.proj[1][1] *= -1; // invert back Y clip coords from glm because they were inverted for opengl
-    memcpy(uniformBufsMapped[currentImage], &ubo, sizeof(ubo));
+    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
   }
 
   void recreateSwapchain() {
@@ -1543,8 +1557,8 @@ private:
 
   void cleanup() {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-      vkDestroySemaphore(device, imageAvailableSems[i], nullptr);
-      vkDestroySemaphore(device, renderFinishedSems[i], nullptr);
+      vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+      vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
       vkDestroyFence(device, inFlightFences[i], nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);
@@ -1555,16 +1569,16 @@ private:
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     cleanupSwapchain();
     vkDestroySampler(device, textureSampler, nullptr);
-    vkDestroyImageView(device, textureImgView, nullptr);
-    vkDestroyImage(device, textureImg, nullptr);
-    vkFreeMemory(device, textureImgMem, nullptr);
-    vkDestroyBuffer(device, vertexBuf, nullptr);
-    vkFreeMemory(device, vertexBufMem, nullptr);
-    vkDestroyBuffer(device, indexBuf, nullptr);
-    vkFreeMemory(device, indexBufMem, nullptr);
+    vkDestroyImageView(device, textureImageView, nullptr);
+    vkDestroyImage(device, textureImage, nullptr);
+    vkFreeMemory(device, textureImageMemory, nullptr);
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+    vkFreeMemory(device, vertexBufferMemory, nullptr);
+    vkDestroyBuffer(device, indexBuffer, nullptr);
+    vkFreeMemory(device, indexBufferMemory, nullptr);
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-      vkDestroyBuffer(device, uniformBufs[i], nullptr);
-      vkFreeMemory(device, uniformBufMems[i], nullptr);
+      vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+      vkFreeMemory(device, uniformBufferMemories[i], nullptr);
     }
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
