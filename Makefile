@@ -13,7 +13,7 @@ TARGET_SHADERS := $(SHADERS:$(SHADERS_DIR)/shader.%=$(BUILD_DIR)/shaders/%.spv)
 
 CXX := clang++
 
-INC_DIRS := $(shell find $(SRC_DIRS) -type d) /usr/include/stb
+INC_DIRS := $(shell find $(SRC_DIRS) -type d) /usr/include/stb tinyobjloader
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 CPPFLAGS := $(INC_FLAGS) -MMD -MP -std=c++23 -Wall -g
 

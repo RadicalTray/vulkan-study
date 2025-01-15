@@ -1,5 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 #include <vulkan/vulkan_core.h>
 #include <array>
 #include <vector>
@@ -25,6 +27,10 @@ struct Vertex {
   glm::vec3 pos;
   glm::vec3 color;
   glm::vec2 texCoord;
+
+  bool operator==(const Vertex &other) const {
+    return pos == other.pos && color == other.color && texCoord == other.texCoord;
+  }
 
   static VkVertexInputBindingDescription getBindingDescription() {
     return {
@@ -56,6 +62,15 @@ struct Vertex {
     return {posAttr, colorAttr, textureAttr};
   }
 };
+
+namespace std {
+  template<> struct hash<Vertex> {
+    size_t operator()(Vertex const &vertex) const {
+      return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1))
+              >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+    }
+  };
+}
 
 // see https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap15.html#interfaces-resources-layout
 struct UniformBufferObject {
