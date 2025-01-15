@@ -28,20 +28,27 @@
 
 #define ERR(msg) throw std::runtime_error(msg)
 
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t SCREEN_WIDTH = 1600;
+constexpr uint32_t SCREEN_HEIGHT = 900;
+
+constexpr uint32_t RECT_WIDTH = 1600;
+constexpr uint32_t RECT_HEIGHT = 900;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-const std::vector<Vertex> vertices = {
-  {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-  {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-  {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-  {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+constexpr uint32_t RECT_TOTAL = RECT_WIDTH + RECT_HEIGHT;
+constexpr float RECT_WIDTH_NORM = float(RECT_WIDTH) / RECT_TOTAL;
+constexpr float RECT_HEIGHT_NORM = float(RECT_HEIGHT) / RECT_TOTAL;
 
-  {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-  {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-  {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-  {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+const std::vector<Vertex> vertices = {
+  {{-RECT_WIDTH_NORM, -RECT_HEIGHT_NORM, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+  {{ RECT_WIDTH_NORM, -RECT_HEIGHT_NORM, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+  {{ RECT_WIDTH_NORM,  RECT_HEIGHT_NORM, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+  {{-RECT_WIDTH_NORM,  RECT_HEIGHT_NORM, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+
+  {{-RECT_WIDTH_NORM, -RECT_HEIGHT_NORM, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+  {{ RECT_WIDTH_NORM, -RECT_HEIGHT_NORM, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+  {{ RECT_WIDTH_NORM,  RECT_HEIGHT_NORM, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+  {{-RECT_WIDTH_NORM,  RECT_HEIGHT_NORM, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
 };
 
 const std::vector<uint16_t> indices = {
@@ -140,7 +147,7 @@ private:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    window = glfwCreateWindow(WIDTH, HEIGHT, "VULKAN", nullptr, nullptr);
+    window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "VULKAN", nullptr, nullptr);
 
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
